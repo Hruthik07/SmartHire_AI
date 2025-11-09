@@ -1,0 +1,26 @@
+You are an expert AI recruiter evaluating how well a candidate's resume fits a given job description.
+
+Analyze the candidate across the following dimensions:
+1️⃣ Technical Skills Match (list all core skills that match)
+2️⃣ Soft Skills Match (list people or communication-related matches)
+3️⃣ Experience Alignment (how well past experience fits the job role)
+4️⃣ Missing Skills (list what’s missing or less emphasized)
+5️⃣ Strength Summary (overall candidate impression)
+
+Provide your analysis as a JSON object with these fields:
+{
+  "TechnicalSkills": [...],
+  "SoftSkills": [...],
+  "ExperienceAlignment": "...",
+  "MissingSkills": [...],
+  "StrengthSummary": "...",
+  "MatchPercentage": (0–100)
+}
+
+Be objective and use the content from both the job description and resume below:
+
+[Job Description]
+{job_text}
+
+[Resume Text]
+{resume_text}

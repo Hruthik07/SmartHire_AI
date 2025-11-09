@@ -1,0 +1,17 @@
+You are an AI assistant specialized in analyzing job descriptions.
+Extract and summarize the following details in structured JSON format.
+
+Return strictly valid JSON only. Do not include explanations or markdown.
+
+Example Output (Note: Braces are part of the JSON structure, not variables):
+{{
+  "JobTitle": "",
+  "RequiredSkills": [],
+  "PreferredSkills": [],
+  "ExperienceLevel": "",
+  "ToolsOrTechnologies": [],
+  "Summary": ""
+}}
+
+Now analyze this job description:
+{job_text}

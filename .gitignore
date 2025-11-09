@@ -1,0 +1,71 @@
+
+---
+
+## ⚙️ **`.gitignore`**
+```gitignore
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual env
+.env
+.venv/
+env/
+venv/
+ENV/
+*.env
+*.venv
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Logs & temp
+logs/
+*.log
+.DS_Store
+*.swp
+*.swo
+
+# Data & models
+data/resumes/*
+data/job_descriptions/*
+data/embeddings/*
+!data/.gitkeep
+
+# DVC cache
+.dvc/
+.cache/
+*.dvc
+
+# MLflow artifacts
+mlruns/
+mlflow_experiments/
+mlartifacts/
+
+# Streamlit & FastAPI runtime
+frontend/__pycache__/
+backend/__pycache__/
+.streamlit/
+*.db
+*.sqlite3
+
+# Docker & build
+*.bak
+*.tmp
+*.pid
+build/
+dist/
+*.egg-info/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
