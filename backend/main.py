@@ -1,8 +1,28 @@
 import os
-import shutil
 import time
-from fastapi import FastAPI, UploadFile, File, Form
+import logging
+import uuid
+from typing import Dict, Any
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+# --------------------------------------------------
+# Import Configuration
+# --------------------------------------------------
+from backend.config import (
+    validate_openai_api_key,
+    ALLOWED_ORIGINS,
+    MAX_FILE_SIZE,
+    ALLOWED_EXTENSIONS,
+    MAX_JOB_DESCRIPTION_LENGTH,
+    MIN_RESUME_TEXT_LENGTH,
+    RESUME_DIR,
+    API_TITLE,
+    API_DESCRIPTION,
+    API_VERSION,
+    LOG_LEVEL,
+    LOG_FORMAT,
+)
 
 # --------------------------------------------------
 # Import your AI Agents
@@ -11,17 +31,23 @@ from backend.agents.job_analyzer.agent import JobAnalyzerAgent
 from backend.agents.resume_analyzer.agent_core import ResumeAnalyzerAgent
 
 # --------------------------------------------------
+# Configure Logging
+# --------------------------------------------------
+logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
+logger = logging.getLogger(__name__)
+
+# --------------------------------------------------
 # FastAPI Setup
 # --------------------------------------------------
 app = FastAPI(
-    title="SmartHire AI Backend (Single Resume Mode)",
-    description="AI-powered resume analysis and job matching system.",
-    version="3.2.0",
+    title=API_TITLE,
+    description=API_DESCRIPTION,
+    version=API_VERSION,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (limit in production)
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,78 +56,177 @@ app.add_middleware(
 # --------------------------------------------------
 # Initialize Agents
 # --------------------------------------------------
-job_agent = JobAnalyzerAgent()
-resume_agent = ResumeAnalyzerAgent()
-
-RESUME_DIR = os.path.join("backend", "data", "resumes")
-os.makedirs(RESUME_DIR, exist_ok=True)
+try:
+    # Validate API key at startup
+    validate_openai_api_key()
+    
+    job_agent = JobAnalyzerAgent()
+    resume_agent = ResumeAnalyzerAgent()
+    logger.info("AI agents initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize AI agents: {e}")
+    raise
 
 # --------------------------------------------------
 # Health Check
 # --------------------------------------------------
 @app.get("/")
-def root():
+def root() -> Dict[str, str]:
+    """Health check endpoint."""
     return {"status": "ok", "message": "🚀 SmartHire AI backend is up and running!"}
 
 # --------------------------------------------------
 # Upload Resume Endpoint
 # --------------------------------------------------
 @app.post("/analyze_resume")
-async def analyze_resume(file: UploadFile = File(...)):
+async def analyze_resume(file: UploadFile = File(...)) -> Dict[str, Any]:
     """
     Upload and extract text from a single resume file.
+    
+    Args:
+        file: Uploaded resume file (PDF, DOCX, DOC, or TXT)
+        
+    Returns:
+        Dict containing status, filename, path, text length, and preview
+        
+    Raises:
+        HTTPException: If file validation fails or processing errors occur
     """
     try:
+        # Validate file extension
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+            )
+        
+        # Read file content to check size
+        file_content = await file.read()
+        file_size = len(file_content)
+        
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024):.1f}MB"
+            )
+        
+        if file_size == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        
+        # Reset file pointer after reading
+        await file.seek(0)
+        
+        # Sanitize filename to prevent path traversal and add UUID to prevent collisions
+        base_filename = os.path.basename(file.filename)
+        name, ext = os.path.splitext(base_filename)
+        unique_filename = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
+        save_path = os.path.join(RESUME_DIR, unique_filename)
+        
         # Save uploaded resume
-        save_path = os.path.join(RESUME_DIR, file.filename)
         with open(save_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+            f.write(file_content)
+        
+        logger.info(f"Resume uploaded successfully: {unique_filename}")
 
         # Extract resume text
         resume_text = resume_agent.extract_text(save_path)
         text_length = len(resume_text or "")
+        
+        if text_length < MIN_RESUME_TEXT_LENGTH:
+            logger.warning(f"Very short text extracted from {unique_filename}: {text_length} chars")
 
         return {
             "status": "success",
-            "file_name": file.filename,
+            "file_name": unique_filename,
             "resume_path": save_path,
             "text_length": text_length,
             "text_preview": resume_text[:600] if resume_text else "No text extracted.",
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"status": "error", "error": f"Resume processing failed: {str(e)}"}
+        logger.error(f"Resume processing failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Resume processing failed: {str(e)}"
+        )
 
 # --------------------------------------------------
 # Analyze Single Resume vs Job Description
 # --------------------------------------------------
 @app.post("/analyze_match")
-async def analyze_match(job_description: str = Form(...)):
+async def analyze_match(job_description: str = Form(...)) -> Dict[str, Any]:
     """
     Analyze the most recently uploaded resume against a job description.
+    
+    Args:
+        job_description: The job description text to match against
+        
+    Returns:
+        Dict containing match analysis results
+        
+    Raises:
+        HTTPException: If validation fails or processing errors occur
     """
     try:
-        # ✅ Find the latest uploaded resume
-        resumes = sorted(
-            [os.path.join(RESUME_DIR, f) for f in os.listdir(RESUME_DIR)],
-            key=os.path.getmtime,
-        )
-
+        # Validate job description
+        if not job_description or not job_description.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Job description cannot be empty"
+            )
+        
+        if len(job_description) > MAX_JOB_DESCRIPTION_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Job description too long. Maximum length: {MAX_JOB_DESCRIPTION_LENGTH} characters"
+            )
+        
+        # Find the latest uploaded resume
+        if not os.path.exists(RESUME_DIR):
+            raise HTTPException(
+                status_code=500,
+                detail="Resume directory not found"
+            )
+            
+        resumes = [
+            os.path.join(RESUME_DIR, f) 
+            for f in os.listdir(RESUME_DIR) 
+            if os.path.isfile(os.path.join(RESUME_DIR, f))
+        ]
+        
         if not resumes:
-            return {"status": "error", "error": "No resumes uploaded. Please upload a resume first."}
-
-        latest_resume = resumes[-1]
+            raise HTTPException(
+                status_code=400,
+                detail="No resumes uploaded. Please upload a resume first."
+            )
+        
+        resumes_sorted = sorted(resumes, key=os.path.getmtime)
+        latest_resume = resumes_sorted[-1]
+        
+        logger.info(f"Analyzing job match for resume: {os.path.basename(latest_resume)}")
+        
         resume_text = resume_agent.extract_text(latest_resume)
 
         if not resume_text.strip():
-            return {"status": "error", "error": "Could not extract readable text from resume."}
+            raise HTTPException(
+                status_code=400,
+                detail="Could not extract readable text from resume"
+            )
 
         # Start timer
         start_time = time.time()
-        print(f"[INFO] 🔍 Analyzing job match for resume: {latest_resume}")
 
-        # Run job-agent LLM reasoning (no FAISS search required in single-resume mode)
+        # Run job-agent LLM reasoning
         analysis_result = job_agent.analyze_job(job_description, top_n=1)
+        
+        if analysis_result.get("status") == "error":
+            raise HTTPException(
+                status_code=500,
+                detail=analysis_result.get("error", "Job analysis failed")
+            )
 
         # Add placeholder FAISS similarity to prevent frontend crash
         match_data = analysis_result.get("match_results", {})
@@ -110,6 +235,8 @@ async def analyze_match(job_description: str = Form(...)):
                 m.setdefault("faiss_similarity", 100.0)
 
         elapsed = round(time.time() - start_time, 2)
+        
+        logger.info(f"Job analysis completed in {elapsed}s")
 
         return {
             "status": "success",
@@ -120,9 +247,11 @@ async def analyze_match(job_description: str = Form(...)):
             "match_results": match_data,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[ERROR] ❌ Job match pipeline failed: {e}")
-        return {
-            "status": "error",
-            "error": f"Job match pipeline failed: {str(e)}",
-        }
+        logger.error(f"Job match pipeline failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Job match pipeline failed: {str(e)}"
+        )
