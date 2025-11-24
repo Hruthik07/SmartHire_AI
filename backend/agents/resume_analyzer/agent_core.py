@@ -6,8 +6,13 @@ Supports PDF, DOCX, and TXT with optional OCR fallback.
 """
 
 import os
+import logging
 import fitz  # PyMuPDF
 from docx import Document
+from typing import Optional
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Optional OCR imports
 try:
@@ -16,13 +21,25 @@ try:
     OCR_ENABLED = True
 except ImportError:
     OCR_ENABLED = False
+    logger.warning("OCR libraries not available. Install pdf2image and pytesseract for OCR support.")
 
 
 class ResumeAnalyzerAgent:
-    """Extract clean text from resume files."""
+    """Extract clean text from resume files with support for multiple formats."""
 
     def extract_text(self, file_path: str) -> str:
-        """Extract text from PDF, DOCX, or TXT files."""
+        """
+        Extract text from PDF, DOCX, or TXT files.
+        
+        Args:
+            file_path: Path to the resume file
+            
+        Returns:
+            Extracted text as string
+            
+        Raises:
+            FileNotFoundError: If file doesn't exist
+        """
         ext = os.path.splitext(file_path)[1].lower()
         text = ""
 
@@ -33,7 +50,7 @@ class ResumeAnalyzerAgent:
             if ext == ".pdf":
                 text = self._extract_pdf_text(file_path)
                 if len(text.strip()) < 50 and OCR_ENABLED:
-                    print(f"[INFO] Using OCR for {file_path}...")
+                    logger.info(f"Using OCR for {os.path.basename(file_path)}...")
                     text = self._extract_pdf_with_ocr(file_path)
 
             elif ext in [".docx", ".doc"]:
@@ -44,16 +61,24 @@ class ResumeAnalyzerAgent:
                     text = f.read()
 
             else:
-                print(f"[WARN] Unsupported file format: {ext}")
+                logger.warning(f"Unsupported file format: {ext}")
 
             return text.strip()
 
         except Exception as e:
-            print(f"[ERROR] Failed to extract text from {file_path}: {e}")
+            logger.error(f"Failed to extract text from {file_path}: {e}", exc_info=True)
             return ""
 
     def _extract_pdf_text(self, file_path: str) -> str:
-        """Extract text from text-based PDFs."""
+        """
+        Extract text from text-based PDFs.
+        
+        Args:
+            file_path: Path to PDF file
+            
+        Returns:
+            Extracted text
+        """
         try:
             text = ""
             with fitz.open(file_path) as pdf_doc:
@@ -61,27 +86,43 @@ class ResumeAnalyzerAgent:
                     text += page.get_text("text")
             return text
         except Exception as e:
-            print(f"[ERROR] PDF text extraction failed: {e}")
+            logger.error(f"PDF text extraction failed for {file_path}: {e}")
             return ""
 
     def _extract_docx_text(self, file_path: str) -> str:
-        """Extract text from DOCX/DOC files."""
+        """
+        Extract text from DOCX/DOC files.
+        
+        Args:
+            file_path: Path to DOCX file
+            
+        Returns:
+            Extracted text
+        """
         try:
             doc = Document(file_path)
             return "\n".join([p.text for p in doc.paragraphs])
         except Exception as e:
-            print(f"[ERROR] DOCX text extraction failed: {e}")
+            logger.error(f"DOCX text extraction failed for {file_path}: {e}")
             return ""
 
     def _extract_pdf_with_ocr(self, file_path: str) -> str:
-        """OCR fallback for scanned PDFs."""
+        """
+        OCR fallback for scanned PDFs.
+        
+        Args:
+            file_path: Path to PDF file
+            
+        Returns:
+            Extracted text via OCR
+        """
         if not OCR_ENABLED:
-            print("[INFO] OCR not available (install pdf2image + pytesseract).")
+            logger.info("OCR not available (install pdf2image + pytesseract).")
             return ""
         try:
             pages = convert_from_path(file_path)
             text = "".join(pytesseract.image_to_string(p) for p in pages)
             return text
         except Exception as e:
-            print(f"[ERROR] OCR extraction failed: {e}")
+            logger.error(f"OCR extraction failed for {file_path}: {e}")
             return ""
