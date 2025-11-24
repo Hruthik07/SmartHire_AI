@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 
+from backend.config import LLM_MODEL, LLM_TEMPERATURE, LLM_TIMEOUT, WEIGHT_FAISS, WEIGHT_LLM, WEIGHT_KEYWORD
 from backend.agents.resume_analyzer.embeddings import get_embedding, load_id_map
 from backend.agents.resume_analyzer.agent import ResumeAnalyzerAgent
 
@@ -146,10 +147,10 @@ class JobAnalyzerAgent:
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=LLM_MODEL,
                 messages=[{"role": "user", "content": prompt_text}],
-                temperature=0.2,
-                timeout=60,  # Add timeout
+                temperature=LLM_TEMPERATURE,
+                timeout=LLM_TIMEOUT,
             )
             return response.choices[0].message.content.strip()
         except OpenAIError as e:
@@ -218,10 +219,10 @@ class JobAnalyzerAgent:
         # Call LLM with error handling
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=LLM_MODEL,
                 messages=[{"role": "user", "content": prompt_text}],
-                temperature=0.2,
-                timeout=60,
+                temperature=LLM_TEMPERATURE,
+                timeout=LLM_TIMEOUT,
             )
             raw = response.choices[0].message.content.strip()
         except OpenAIError as e:
@@ -329,8 +330,11 @@ class JobAnalyzerAgent:
             llm_result = self.llm_match_score(job_text, resume_text)
             llm_pct = float(llm_result.get("MatchPercentage", 0.0))
 
-            # Weighted average: 40% FAISS + 40% LLM + 20% Keyword
-            final_pct = round(0.4 * faiss_pct + 0.4 * llm_pct + 0.2 * kw_pct, 2)
+            # Weighted average using config values
+            final_pct = round(
+                WEIGHT_FAISS * faiss_pct + WEIGHT_LLM * llm_pct + WEIGHT_KEYWORD * kw_pct,
+                2
+            )
 
             logger.info(
                 f"{os.path.basename(resume_path)} → "

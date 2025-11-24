@@ -1,10 +1,26 @@
 import os
-import shutil
 import time
 import logging
 from typing import Dict, Any
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
+# --------------------------------------------------
+# Import Configuration
+# --------------------------------------------------
+from backend.config import (
+    ALLOWED_ORIGINS,
+    MAX_FILE_SIZE,
+    ALLOWED_EXTENSIONS,
+    MAX_JOB_DESCRIPTION_LENGTH,
+    MIN_RESUME_TEXT_LENGTH,
+    RESUME_DIR,
+    API_TITLE,
+    API_DESCRIPTION,
+    API_VERSION,
+    LOG_LEVEL,
+    LOG_FORMAT,
+)
 
 # --------------------------------------------------
 # Import your AI Agents
@@ -15,31 +31,21 @@ from backend.agents.resume_analyzer.agent_core import ResumeAnalyzerAgent
 # --------------------------------------------------
 # Configure Logging
 # --------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
 logger = logging.getLogger(__name__)
-
-# --------------------------------------------------
-# Constants
-# --------------------------------------------------
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt"}
-MAX_JOB_DESCRIPTION_LENGTH = 50000  # characters
 
 # --------------------------------------------------
 # FastAPI Setup
 # --------------------------------------------------
 app = FastAPI(
-    title="SmartHire AI Backend (Single Resume Mode)",
-    description="AI-powered resume analysis and job matching system.",
-    version="3.2.0",
+    title=API_TITLE,
+    description=API_DESCRIPTION,
+    version=API_VERSION,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:8501").split(","),
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,20 +55,12 @@ app.add_middleware(
 # Initialize Agents
 # --------------------------------------------------
 try:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        logger.error("OPENAI_API_KEY not found in environment variables")
-        raise ValueError("OPENAI_API_KEY environment variable is required")
-    
     job_agent = JobAnalyzerAgent()
     resume_agent = ResumeAnalyzerAgent()
     logger.info("AI agents initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize AI agents: {e}")
     raise
-
-RESUME_DIR = os.path.join("backend", "data", "resumes")
-os.makedirs(RESUME_DIR, exist_ok=True)
 
 # --------------------------------------------------
 # Health Check
@@ -128,7 +126,7 @@ async def analyze_resume(file: UploadFile = File(...)) -> Dict[str, Any]:
         resume_text = resume_agent.extract_text(save_path)
         text_length = len(resume_text or "")
         
-        if text_length < 50:
+        if text_length < MIN_RESUME_TEXT_LENGTH:
             logger.warning(f"Very short text extracted from {safe_filename}: {text_length} chars")
 
         return {

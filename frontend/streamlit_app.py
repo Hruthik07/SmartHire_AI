@@ -1,7 +1,18 @@
 import json
+import logging
 import requests
 import streamlit as st
 import plotly.graph_objects as go
+from typing import Optional, Dict, Any
+
+# --------------------------------------------------
+# Configure Logging
+# --------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------
 # CONFIG
@@ -13,6 +24,7 @@ st.set_page_config(
 )
 
 BACKEND_URL = "http://127.0.0.1:8000"
+REQUEST_TIMEOUT = 120  # seconds
 
 # --------------------------------------------------
 # SIDEBAR – UPLOAD RESUME
@@ -29,7 +41,12 @@ if uploaded_file is not None:
     with st.spinner("Uploading & processing resume..."):
         try:
             files = {"file": (uploaded_file.name, uploaded_file, "application/pdf")}
-            res = requests.post(f"{BACKEND_URL}/analyze_resume", files=files, timeout=120)
+            res = requests.post(
+                f"{BACKEND_URL}/analyze_resume", 
+                files=files, 
+                timeout=REQUEST_TIMEOUT
+            )
+            
             if res.status_code == 200:
                 payload = res.json()
                 if payload.get("status") == "success":
@@ -37,12 +54,24 @@ if uploaded_file is not None:
                     st.sidebar.caption(
                         f"Text length: {payload.get('text_length', 'N/A')} chars"
                     )
+                    logger.info(f"Resume uploaded successfully: {uploaded_file.name}")
                 else:
-                    st.sidebar.error(f"❌ Upload failed: {payload.get('error', 'Unknown error')}")
+                    error_msg = payload.get("error", "Unknown error")
+                    st.sidebar.error(f"❌ Upload failed: {error_msg}")
+                    logger.error(f"Resume upload failed: {error_msg}")
             else:
                 st.sidebar.error(f"❌ Upload failed (HTTP {res.status_code})")
+                logger.error(f"Resume upload failed with HTTP {res.status_code}")
+                
+        except requests.exceptions.Timeout:
+            st.sidebar.error("❌ Upload timed out. Please try again.")
+            logger.error("Resume upload timed out")
+        except requests.exceptions.ConnectionError:
+            st.sidebar.error("❌ Cannot connect to backend. Please ensure the server is running.")
+            logger.error("Cannot connect to backend server")
         except Exception as e:
             st.sidebar.error(f"❌ Upload failed: {e}")
+            logger.error(f"Resume upload error: {e}", exc_info=True)
 
 # --------------------------------------------------
 # MAIN LAYOUT
@@ -70,7 +99,16 @@ analyze_button = st.button("🔍 Analyze Match", use_container_width=True)
 # --------------------------------------------------
 # HELPER – SAFE JSON PARSE
 # --------------------------------------------------
-def try_parse_json(text: str):
+def try_parse_json(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Safely parse JSON from text.
+    
+    Args:
+        text: JSON string to parse
+        
+    Returns:
+        Parsed dict or None if parsing fails
+    """
     if not isinstance(text, str):
         return None
     text = text.strip()
@@ -78,7 +116,11 @@ def try_parse_json(text: str):
         return None
     try:
         return json.loads(text)
-    except Exception:
+    except json.JSONDecodeError as e:
+        logger.warning(f"JSON parse error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error parsing JSON: {e}")
         return None
 
 
@@ -87,9 +129,9 @@ def try_parse_json(text: str):
 # --------------------------------------------------
 if analyze_button:
     if uploaded_file is None:
-        st.warning("Please upload a resume first on the left panel.")
+        st.warning("⚠️ Please upload a resume first on the left panel.")
     elif not job_description.strip():
-        st.warning("Please enter a job description to analyze.")
+        st.warning("⚠️ Please enter a job description to analyze.")
     else:
         with st.spinner("Analyzing resume vs job description..."):
             try:
@@ -98,9 +140,33 @@ if analyze_button:
                     data={"job_description": job_description},
                     timeout=300,
                 )
-                data = resp.json()
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                elif resp.status_code == 400:
+                    st.error(f"❌ Invalid request: {resp.json().get('detail', 'Bad request')}")
+                    logger.error(f"Bad request: {resp.json()}")
+                    st.stop()
+                elif resp.status_code == 500:
+                    st.error(f"❌ Server error: {resp.json().get('detail', 'Internal server error')}")
+                    logger.error(f"Server error: {resp.json()}")
+                    st.stop()
+                else:
+                    st.error(f"❌ Unexpected error (HTTP {resp.status_code})")
+                    logger.error(f"Unexpected HTTP status: {resp.status_code}")
+                    st.stop()
+                    
+            except requests.exceptions.Timeout:
+                st.error("❌ Request timed out. The analysis is taking too long. Please try again.")
+                logger.error("Analysis request timed out")
+                data = None
+            except requests.exceptions.ConnectionError:
+                st.error("❌ Cannot connect to backend. Please ensure the server is running.")
+                logger.error("Cannot connect to backend server")
+                data = None
             except Exception as e:
                 st.error(f"❌ Failed to contact backend: {e}")
+                logger.error(f"Backend connection error: {e}", exc_info=True)
                 data = None
 
         if not data:
