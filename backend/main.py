@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import uuid
 from typing import Dict, Any
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import Configuration
 # --------------------------------------------------
 from backend.config import (
+    validate_openai_api_key,
     ALLOWED_ORIGINS,
     MAX_FILE_SIZE,
     ALLOWED_EXTENSIONS,
@@ -55,6 +57,9 @@ app.add_middleware(
 # Initialize Agents
 # --------------------------------------------------
 try:
+    # Validate API key at startup
+    validate_openai_api_key()
+    
     job_agent = JobAnalyzerAgent()
     resume_agent = ResumeAnalyzerAgent()
     logger.info("AI agents initialized successfully")
@@ -112,26 +117,28 @@ async def analyze_resume(file: UploadFile = File(...)) -> Dict[str, Any]:
         # Reset file pointer after reading
         await file.seek(0)
         
-        # Sanitize filename to prevent path traversal
-        safe_filename = os.path.basename(file.filename)
-        save_path = os.path.join(RESUME_DIR, safe_filename)
+        # Sanitize filename to prevent path traversal and add UUID to prevent collisions
+        base_filename = os.path.basename(file.filename)
+        name, ext = os.path.splitext(base_filename)
+        unique_filename = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
+        save_path = os.path.join(RESUME_DIR, unique_filename)
         
         # Save uploaded resume
         with open(save_path, "wb") as f:
             f.write(file_content)
         
-        logger.info(f"Resume uploaded successfully: {safe_filename}")
+        logger.info(f"Resume uploaded successfully: {unique_filename}")
 
         # Extract resume text
         resume_text = resume_agent.extract_text(save_path)
         text_length = len(resume_text or "")
         
         if text_length < MIN_RESUME_TEXT_LENGTH:
-            logger.warning(f"Very short text extracted from {safe_filename}: {text_length} chars")
+            logger.warning(f"Very short text extracted from {unique_filename}: {text_length} chars")
 
         return {
             "status": "success",
-            "file_name": safe_filename,
+            "file_name": unique_filename,
             "resume_path": save_path,
             "text_length": text_length,
             "text_preview": resume_text[:600] if resume_text else "No text extracted.",

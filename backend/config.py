@@ -10,12 +10,42 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+"""
+Configuration module for SmartHire AI Backend
+Centralizes all configuration settings and constants
+"""
+
+import os
+from typing import Set, Optional
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 # ==========================================================
 # API Configuration
 # ==========================================================
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable is required")
+def get_openai_api_key() -> Optional[str]:
+    """
+    Get OpenAI API key from environment.
+    Returns None if not set (allows for testing/docs generation).
+    """
+    return os.getenv("OPENAI_API_KEY")
+
+def validate_openai_api_key() -> str:
+    """
+    Validate that OpenAI API key is set.
+    Should be called at application startup.
+    
+    Raises:
+        ValueError: If API key is not set
+    """
+    api_key = get_openai_api_key()
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable is required")
+    return api_key
+
+OPENAI_API_KEY = get_openai_api_key()
 
 # ==========================================================
 # CORS Configuration

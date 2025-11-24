@@ -9,7 +9,7 @@ from openai import OpenAI, OpenAIError
 
 from backend.config import LLM_MODEL, LLM_TEMPERATURE, LLM_TIMEOUT, WEIGHT_FAISS, WEIGHT_LLM, WEIGHT_KEYWORD
 from backend.agents.resume_analyzer.embeddings import get_embedding, load_id_map
-from backend.agents.resume_analyzer.agent import ResumeAnalyzerAgent
+from backend.agents.resume_analyzer.agent_core import ResumeAnalyzerAgent
 
 load_dotenv()
 
